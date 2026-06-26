@@ -439,13 +439,22 @@ function formatContext(results) {
   }).join("\n\n-----------------\n\n");
 }
 
-async function askQuestion(question) {
+async function retrieveKnowledgeContext(question) {
   if (!ragReady) throw new Error("RAG not initialized");
 
   const contextResults = await getMultiQueryContext(question);
   const context = formatContext(contextResults);
   const citations = contextResults.map((result) => formatCitation(result.metadata, result.score));
-  const foundContext = contextResults.length > 0;
+
+  return {
+    context,
+    citations,
+    foundContext: contextResults.length > 0,
+  };
+}
+
+async function askQuestion(question) {
+  const { context, citations, foundContext } = await retrieveKnowledgeContext(question);
   const structuredModel = llm.withStructuredOutput(ChatResponseSchema);
 
   const prompt = `
@@ -492,6 +501,7 @@ module.exports = {
   initializeRAG,
   indexKnowledgeBase,
   askQuestion,
+  retrieveKnowledgeContext,
   isRAGReady,
   getKnowledgeBaseStatus,
 };

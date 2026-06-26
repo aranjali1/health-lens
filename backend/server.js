@@ -6,6 +6,7 @@ dotenv.config();
 
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const { initializeRAG } = require("./services/ragService");
 
@@ -30,6 +31,7 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 
 app.use("/api/auth", authRoutes);
+app.use("/api/chat", chatRoutes);
 app.use("/api/reports", reportRoutes);
 
 app.get("/", (req, res) => {

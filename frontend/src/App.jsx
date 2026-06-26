@@ -5,7 +5,6 @@ import Auth from './Auth';
 import {
   Activity,
   AlertCircle,
-  BookOpen,
   CheckCircle,
   ChevronRight,
   ClipboardList,
@@ -27,10 +26,6 @@ import {
 
 const API_BASE_URL = 'http://localhost:5003';
 const DEFAULT_GREETING = 'Hello! I am MedInsight. How can I help you analyze your reports today?';
-const CHAT_MODES = {
-  REPORT: 'report',
-  KNOWLEDGE: 'knowledge',
-};
 
 function formatAnswer(answer, options = {}) {
   const { includeDisclaimer = true } = options;
@@ -59,17 +54,6 @@ function formatAnswer(answer, options = {}) {
 
     if (answer.knowledgeBaseNotice) {
       parts.push(answer.knowledgeBaseNotice);
-    }
-
-    if (Array.isArray(answer.citations) && answer.citations.length > 0) {
-      const citations = answer.citations
-        .map((item, index) => {
-          const page = item.page ? `, page ${item.page}` : '';
-          const score = typeof item.score === 'number' ? ` (${Math.round(item.score * 100)}% match)` : '';
-          return `${index + 1}. ${item.source || 'Knowledge base'}${page}${score}`;
-        })
-        .join('\n');
-      parts.push(`Sources:\n${citations}`);
     }
 
     if (answer.disclaimer && includeDisclaimer) {
@@ -167,7 +151,6 @@ function Dashboard({ setToken }) {
   const [question, setQuestion] = useState('');
   const [globalChatHistory, setGlobalChatHistory] = useState([{ role: 'ai', content: DEFAULT_GREETING }]);
   const [reportChatHistory, setReportChatHistory] = useState([{ role: 'ai', content: DEFAULT_GREETING }]);
-  const [chatMode, setChatMode] = useState(CHAT_MODES.REPORT);
   const [isQuerying, setIsQuerying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
@@ -182,7 +165,8 @@ function Dashboard({ setToken }) {
 
   const fileInputRef = useRef(null);
   const selectedReportId = getReportId(selectedReport);
-  const activeChatHistory = chatMode === CHAT_MODES.REPORT ? reportChatHistory : globalChatHistory;
+  const hasReportContext = activeSection === 'reports' && Boolean(selectedReportId);
+  const activeChatHistory = hasReportContext ? reportChatHistory : globalChatHistory;
   const filteredReports = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return reports;
@@ -273,7 +257,6 @@ function Dashboard({ setToken }) {
     if (!reportId) return;
 
     setSelectedReport(report);
-    setChatMode(CHAT_MODES.REPORT);
     setHasShownMedicalDisclaimer(false);
     if (switchSection) setActiveSection('reports');
 
@@ -310,7 +293,7 @@ function Dashboard({ setToken }) {
 
       setUploadStatus('success');
       setSelectedReport(report);
-      setChatMode(CHAT_MODES.REPORT);
+      setActiveSection('reports');
       setHasShownMedicalDisclaimer(false);
       setReportChatHistory([
         { role: 'ai', content: DEFAULT_GREETING },
@@ -346,7 +329,7 @@ function Dashboard({ setToken }) {
   };
 
   const appendToActiveChat = (message) => {
-    if (chatMode === CHAT_MODES.REPORT) {
+    if (hasReportContext) {
       setReportChatHistory((prev) => [...prev, message]);
     } else {
       setGlobalChatHistory((prev) => [...prev, message]);
@@ -363,21 +346,10 @@ function Dashboard({ setToken }) {
     setIsQuerying(true);
 
     try {
-      let response;
-
-      if (chatMode === CHAT_MODES.REPORT) {
-        if (!selectedReportId) {
-          appendToActiveChat({ role: 'ai', content: 'Select or upload a report first, then I can interpret it.' });
-          return;
-        }
-        response = await axios.post(`${API_BASE_URL}/api/reports/${selectedReportId}/chat`, {
-          question: userQuestion,
-        });
-      } else {
-        response = await axios.post(`${API_BASE_URL}/api/reports/query`, {
-          question: userQuestion,
-        });
-      }
+      const response = await axios.post(`${API_BASE_URL}/api/chat`, {
+        question: userQuestion,
+        reportId: hasReportContext ? selectedReportId : null,
+      });
 
       const answer = response.data.answer;
       const shouldShowDisclaimer = Boolean(answer?.disclaimer) && !hasShownMedicalDisclaimer;
@@ -387,7 +359,7 @@ function Dashboard({ setToken }) {
       });
       if (shouldShowDisclaimer) setHasShownMedicalDisclaimer(true);
 
-      if (chatMode === CHAT_MODES.REPORT && selectedReport) {
+      if (hasReportContext && selectedReport) {
         await loadReports({ preserveSelection: true });
       }
     } catch (error) {
@@ -395,10 +367,7 @@ function Dashboard({ setToken }) {
       if (error.response && error.response.status === 401) {
         handleLogout();
       } else {
-        const fallback =
-          chatMode === CHAT_MODES.REPORT
-            ? "Sorry, I couldn't analyze that report right now."
-            : 'Sorry, there was an error connecting to the MedInsight knowledge base.';
+        const fallback = "Sorry, I couldn't answer that right now.";
         const detail = getApiErrorMessage(error);
         appendToActiveChat({ role: 'ai', content: detail ? `${fallback} ${detail}` : fallback });
       }
@@ -408,11 +377,9 @@ function Dashboard({ setToken }) {
   };
 
   const placeholder =
-    chatMode === CHAT_MODES.REPORT
-      ? selectedReport
-        ? `Ask about ${getReportTitle(selectedReport)}...`
-        : 'Select a report to ask about...'
-      : 'Ask the medical knowledge base...';
+    hasReportContext && selectedReport
+      ? `Ask about ${getReportTitle(selectedReport)}...`
+      : 'Ask about reports or medical concepts...';
 
   return (
     <div className="flex h-screen bg-[#FAFAFA] font-sans text-stone-800 overflow-hidden">
@@ -441,10 +408,7 @@ function Dashboard({ setToken }) {
               icon={<MessageSquare size={20} />}
               label="Knowledge Base"
               active={activeSection === 'knowledge'}
-              onClick={() => {
-                setActiveSection('knowledge');
-                setChatMode(CHAT_MODES.KNOWLEDGE);
-              }}
+              onClick={() => setActiveSection('knowledge')}
             />
           </nav>
         </div>
@@ -495,10 +459,7 @@ function Dashboard({ setToken }) {
                   knowledgeStatus={knowledgeStatus}
                   onSelectReport={selectReport}
                   onOpenReports={() => setActiveSection('reports')}
-                  onOpenKnowledge={() => {
-                    setActiveSection('knowledge');
-                    setChatMode(CHAT_MODES.KNOWLEDGE);
-                  }}
+                  onOpenKnowledge={() => setActiveSection('knowledge')}
                 />
               )}
 
@@ -537,10 +498,8 @@ function Dashboard({ setToken }) {
                   <div>
                     <h2 className="text-base font-semibold text-stone-800">AI Assistant</h2>
                     <p className="text-xs text-stone-500 mt-1">
-                      {chatMode === CHAT_MODES.REPORT
-                        ? selectedReport
-                          ? `Using ${getReportTitle(selectedReport)}`
-                          : 'Report mode needs a selected report'
+                      {hasReportContext && selectedReport
+                        ? `Using ${getReportTitle(selectedReport)} with the indexed medical knowledge base`
                         : 'Using the indexed medical knowledge base'}
                     </p>
                   </div>
@@ -548,11 +507,6 @@ function Dashboard({ setToken }) {
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>Gemini 3.1 Flash-Lite
                   </div>
                 </div>
-                <ChatModeToggle
-                  mode={chatMode}
-                  hasSelectedReport={Boolean(selectedReportId)}
-                  onChange={(mode) => setChatMode(mode)}
-                />
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -624,7 +578,7 @@ function DashboardPanel({ stats, reports, selectedReport, knowledgeStatus, onSel
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-base font-semibold text-stone-800">Selected Report</h2>
-            <p className="text-sm text-stone-500">Current report context for the assistant.</p>
+            <p className="text-sm text-stone-500">Latest selected medical record.</p>
           </div>
           <Stethoscope size={22} className="text-amber-900" />
         </div>
@@ -872,34 +826,6 @@ function KnowledgeStatusCard({ status, isRefreshing, isSyncing, onRefresh, onSyn
           {compactActions ? 'Manage' : 'Sync'}
         </button>
       </div>
-    </div>
-  );
-}
-
-function ChatModeToggle({ mode, hasSelectedReport, onChange }) {
-  return (
-    <div className="grid grid-cols-2 gap-2 bg-white border border-stone-200 rounded-xl p-1">
-      <button
-        type="button"
-        onClick={() => onChange(CHAT_MODES.REPORT)}
-        disabled={!hasSelectedReport}
-        className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
-          mode === CHAT_MODES.REPORT ? 'bg-amber-900 text-white shadow-sm' : 'text-stone-600 hover:bg-stone-50'
-        }`}
-      >
-        <FileSearch size={15} />
-        Report
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange(CHAT_MODES.KNOWLEDGE)}
-        className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
-          mode === CHAT_MODES.KNOWLEDGE ? 'bg-amber-900 text-white shadow-sm' : 'text-stone-600 hover:bg-stone-50'
-        }`}
-      >
-        <BookOpen size={15} />
-        Knowledge Base
-      </button>
     </div>
   );
 }

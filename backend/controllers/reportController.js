@@ -21,6 +21,7 @@ const handleUserQuery = async (req, res) => {
     const answer = await askRagQuestion(question);
     res.status(200).json({ success: true, answer });
   } catch (error) {
+    console.error("CRASH IN handleUserQuery:", error);
     res.status(500).json({ message: error.message });
   }
 };

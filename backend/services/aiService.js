@@ -1,148 +1,99 @@
-const {
-  ChatGoogleGenerativeAI,
-} = require("@langchain/google-genai");
-
-const {
-  PromptTemplate,
-} = require("@langchain/core/prompts");
-
+const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
+const { PromptTemplate } = require("@langchain/core/prompts");
 const { z } = require("zod");
 
-const model =
-  new ChatGoogleGenerativeAI({
-    model: "gemini-2.5-flash",
-    apiKey: process.env.GEMINI_API_KEY,
-  });
-
+// -----------------------------
+// Zod Schema
+// -----------------------------
 const ReportSchema = z.object({
   reportType: z.string(),
-
   summary: z.string(),
-
-  abnormalValues: z.array(
-    z.string()
-  ),
-
-  suggestions: z.array(
-    z.string()
-  ),
-
-  suggestedQuestions: z.array(
-    z.string()
-  ),
-
+  abnormalValues: z.array(z.string()),
+  suggestions: z.array(z.string()),
+  suggestedQuestions: z.array(z.string()),
   parameters: z.array(
     z.object({
       parameter: z.string(),
       value: z.string(),
-      referenceRange:
-        z.string(),
-      status: z.string(),
+      referenceRange: z.string(),
+      status: z.enum([
+        "Low",
+        "Normal",
+        "High",
+        "Critical",
+        "Unknown",
+      ]),
     })
   ),
 });
 
-const analyzeReport = async (
-  reportText,
-  language = "English"
-) => {
+// -----------------------------
+// Gemini Model
+// -----------------------------
+const model = new ChatGoogleGenerativeAI({
+  model: "gemini-2.5-flash",
+  apiKey: process.env.GEMINI_API_KEY,
+  temperature: 0,
+});
 
-  const structuredModel =
-    model.withStructuredOutput(
-      ReportSchema
-    );
-
-  const prompt =
-  PromptTemplate.fromTemplate(`
+// -----------------------------
+// Prompt
+// -----------------------------
+const prompt = PromptTemplate.fromTemplate(`
 You are an AI Medical Report Analyzer.
 
-Your job is to analyze medical reports and convert them into structured insights.
+Your task is to analyze the uploaded medical report and return structured information.
 
-IMPORTANT RULES:
-
+Rules:
 1. Never diagnose diseases.
 2. Never prescribe medicines.
-3. Never claim a person has a medical condition.
-4. Never replace a doctor.
+3. Never replace a doctor.
+4. Explain findings in simple patient-friendly language.
 5. Always recommend consulting a healthcare professional.
-6. Explain findings in simple patient-friendly language.
-7. Generate all responses in {language}.
-8. If the uploaded document is NOT a medical report, identify it and return empty parameters.
-
-TASKS:
-
-1. Identify report type
-   Examples:
-   - CBC
-   - Lipid Profile
-   - Thyroid Profile
-   - Liver Function Test
-   - Kidney Function Test
-   - Blood Sugar Report
-   - Vitamin Report
-   - Medical Report
-   - Non-Medical Document
-
-2. Generate a concise summary.
-
-3. Extract ALL medical parameters found in the report.
-
-For each parameter extract:
-
-- parameter
-- value
-- referenceRange
-- status
-
-Status must be one of:
-- Low
-- Normal
-- High
-- Critical
-- Unknown
-
-4. Create a list of abnormal values.
-
-5. Generate 3-5 general health suggestions based on the report findings.
-
-6. Generate 3-5 useful questions a patient may want to ask.
-
-PARAMETER EXTRACTION RULES:
-
-- Extract every available parameter.
-- Never skip parameters if values exist.
-- If reference range is missing, use "Not Available".
-- If status cannot be determined, use "Unknown".
-- Preserve original units.
-- Do not invent values.
-
-NON-MEDICAL DOCUMENT RULES:
-
-If the document is not a medical report:
-
-- reportType = "Non-Medical Document"
-- parameters = []
-- abnormalValues = []
-- Explain that the uploaded document is not a medical report.
+6. Generate every response in {language}.
+7. If the uploaded document is NOT a medical report:
+   - reportType = "Non-Medical Document"
+   - summary = Explain that the uploaded file is not a medical report.
+   - abnormalValues = []
+   - suggestions = []
+   - suggestedQuestions = []
+   - parameters = []
 
 Medical Report:
 
 {report}
 `);
 
-  const chain =
-    prompt.pipe(
-      structuredModel
-    );
+// -----------------------------
+// Structured Model
+// -----------------------------
+const structuredModel = model.withStructuredOutput(ReportSchema);
 
-  const result =
-    await chain.invoke({
+// -----------------------------
+// Analyzer
+// -----------------------------
+async function analyzeReport(reportText, language = "English") {
+  try {
+    const chain = prompt.pipe(structuredModel);
+
+    const result = await chain.invoke({
       report: reportText,
       language,
     });
 
-  return result;
-};
+    return result;
+  } catch (error) {
+    console.error("Medical Report Analysis Error:", error);
 
-module.exports =
-  analyzeReport;
+    return {
+      reportType: "Parsing Error",
+      summary: "Unable to analyze the medical report safely.",
+      abnormalValues: [],
+      suggestions: [],
+      suggestedQuestions: [],
+      parameters: [],
+    };
+  }
+}
+
+module.exports = analyzeReport;

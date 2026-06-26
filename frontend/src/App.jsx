@@ -7,6 +7,32 @@ import {
   LayoutDashboard, Settings, Search, Send, Loader2, CheckCircle, LogOut
 } from 'lucide-react';
 
+const API_BASE_URL = 'http://localhost:5003';
+
+function formatAnswer(answer) {
+  if (typeof answer === 'string') return answer;
+
+  if (answer?.answer) {
+    const parts = [answer.answer];
+
+    if (answer.disclaimer) {
+      parts.push(answer.disclaimer);
+    }
+
+    if (Array.isArray(answer.followUpQuestions) && answer.followUpQuestions.length > 0) {
+      parts.push(`Follow-up questions:\n${answer.followUpQuestions.map((item) => `- ${item}`).join('\n')}`);
+    }
+
+    return parts.join('\n\n');
+  }
+
+  return 'I received a response, but could not display it.';
+}
+
+function getApiErrorMessage(error) {
+  return error.response?.data?.details || error.response?.data?.message || error.message;
+}
+
 axios.interceptors.request.use((config) => {
   const token = localStorage.getItem('medinsight_token');
   if (token) {
@@ -58,14 +84,15 @@ function Dashboard({ setToken }) {
     formData.append('report', file); 
 
     try {
-      const response = await axios.post('http://localhost:5003/api/reports/upload', formData, {
+      const response = await axios.post(`${API_BASE_URL}/api/reports/upload`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setUploadStatus('success');
       
       // FIXED: Save the ID returned from the backend so the chat can use it
-      if (response.data.report && response.data.report._id) {
-        setCurrentReportId(response.data.report._id);
+      const reportId = response.data?.report?._id || response.data?.report?.id;
+      if (reportId) {
+        setCurrentReportId(reportId);
       }
 
       setChatHistory(prev => [...prev, { role: 'ai', content: `I've successfully processed "${file.name}". You can now ask me questions about it!` }]);
@@ -92,22 +119,27 @@ function Dashboard({ setToken }) {
       
       // FIXED: Conditional routing. Report specific vs. Global KB
       if (currentReportId) {
-        response = await axios.post(`http://localhost:5003/api/reports/${currentReportId}/chat`, { 
+        response = await axios.post(`${API_BASE_URL}/api/reports/${currentReportId}/chat`, { 
           question: userQuestion 
         });
       } else {
-        response = await axios.post('http://localhost:5003/api/reports/query', { 
+        response = await axios.post(`${API_BASE_URL}/api/reports/query`, { 
           question: userQuestion 
         });
       }
       
-      setChatHistory(prev => [...prev, { role: 'ai', content: response.data.answer }]);
+      setChatHistory(prev => [...prev, { role: 'ai', content: formatAnswer(response.data.answer) }]);
     } catch (error) {
       console.error("Error asking AI:", error);
       if (error.response && error.response.status === 401) {
         handleLogout(); 
       } else {
-        setChatHistory(prev => [...prev, { role: 'ai', content: 'Sorry, there was an error connecting to the MedInsight knowledge base.' }]);
+        const fallback = currentReportId
+          ? "Sorry, I couldn't analyze that report right now."
+          : "Sorry, there was an error connecting to the MedInsight knowledge base.";
+        const detail = getApiErrorMessage(error);
+
+        setChatHistory(prev => [...prev, { role: 'ai', content: detail ? `${fallback} ${detail}` : fallback }]);
       }
     } finally {
       setIsQuerying(false);
@@ -176,7 +208,7 @@ function Dashboard({ setToken }) {
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
                 {chatHistory.map((msg, index) => (
                   <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] p-4 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-amber-900 text-white rounded-2xl rounded-tr-sm' : 'bg-white border border-stone-200 text-stone-700 rounded-2xl rounded-tl-sm'}`}>{msg.content}</div>
+                    <div className={`max-w-[75%] whitespace-pre-line p-4 text-[15px] leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-amber-900 text-white rounded-2xl rounded-tr-sm' : 'bg-white border border-stone-200 text-stone-700 rounded-2xl rounded-tl-sm'}`}>{msg.content}</div>
                   </div>
                 ))}
                 {isQuerying && (<div className="flex justify-start"><div className="bg-white border border-stone-200 text-stone-500 rounded-2xl rounded-tl-sm p-4 shadow-sm flex items-center gap-3"><Loader2 size={18} className="animate-spin text-amber-900" /><span className="text-sm">Analyzing...</span></div></div>)}

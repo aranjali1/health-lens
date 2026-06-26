@@ -6,6 +6,15 @@ const analyzeReport = require("../services/aiService");
 const askReportQuestion = require("../services/chatService");
 const { askQuestion: askRagQuestion, isRAGReady } = require("../services/ragService");
 
+const includeErrorDetails = process.env.NODE_ENV !== "production";
+
+function errorResponse(message, error) {
+  return {
+    message,
+    ...(includeErrorDetails && error?.message ? { details: error.message } : {}),
+  };
+}
+
 const handleUserQuery = async (req, res) => {
   try {
     console.log("RAG Ready:", isRAGReady());
@@ -22,7 +31,7 @@ const handleUserQuery = async (req, res) => {
     res.status(200).json({ success: true, answer });
   } catch (error) {
     console.error("CRASH IN handleUserQuery:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json(errorResponse("Unable to query the knowledge base right now.", error));
   }
 };
 
@@ -61,7 +70,8 @@ const uploadReport = async (req, res) => {
 
     res.status(201).json({ success: true, message: "Report uploaded and analyzed successfully", report });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("CRASH IN uploadReport:", error);
+    res.status(500).json(errorResponse("Unable to upload and analyze this report right now.", error));
   }
 };
 
@@ -112,7 +122,8 @@ const chatWithReport = async (req, res) => {
 
     res.status(200).json({ answer });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("CRASH IN chatWithReport:", error);
+    res.status(500).json(errorResponse("Unable to answer questions about this report right now.", error));
   }
 };
 

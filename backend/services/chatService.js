@@ -12,6 +12,24 @@ const model =
     apiKey: process.env.GEMINI_API_KEY,
   });
 
+function normalizeMessageContent(content) {
+  if (typeof content === "string") return content;
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (typeof part?.text === "string") return part.text;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  return "";
+}
+
 const askQuestion = async (
   reportText,
   question,
@@ -51,7 +69,13 @@ Question:
       language,
     });
 
-  return response.content;
+  const answer = normalizeMessageContent(response.content);
+
+  if (!answer) {
+    throw new Error("The AI returned an empty response for this report.");
+  }
+
+  return answer;
 };
 
 module.exports = askQuestion;
